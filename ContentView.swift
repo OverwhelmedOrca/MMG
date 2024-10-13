@@ -11,11 +11,36 @@ struct Restaurant: Decodable, Identifiable {
     let name: String
     let rating: Double
     let location: Location
+    let imageUrl: String
+    let reviewCount: Int
+    let price: String?
+    let categories: [Category]
+    let phone: String
+    let url: String
+    let isClosed: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case id, name, rating, location, phone, url, categories
+        case imageUrl = "image_url"
+        case reviewCount = "review_count"
+        case price
+        case isClosed = "is_closed"
+    }
 }
 
 struct Location: Decodable {
     let address1: String
     let city: String
+    let displayAddress: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case address1, city
+        case displayAddress = "display_address"
+    }
+}
+
+struct Category: Decodable {
+    let title: String
 }
 
 // MARK: - ViewModel
@@ -27,7 +52,7 @@ class ContentViewModel: ObservableObject {
     
     // Request Calendar Access
     func requestCalendarAccess() {
-        eventStore.requestFullAccessToEvents{ granted, error in
+        eventStore.requestFullAccessToEvents { granted, error in
             if granted {
                 self.fetchCalendarEvents()
             } else {
@@ -66,9 +91,6 @@ class ContentViewModel: ObservableObject {
             }
             
             if let data = data {
-                // Print the raw JSON response for debugging
-                print(String(data: data, encoding: .utf8) ?? "No response data")
-                
                 do {
                     let decodedResponse = try JSONDecoder().decode(YelpResponse.self, from: data)
                     DispatchQueue.main.async {
@@ -102,13 +124,43 @@ struct ContentView: View {
                     .padding(.top)
                 
                 List(viewModel.restaurants) { restaurant in
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        AsyncImage(url: URL(string: restaurant.imageUrl)) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(height: 200)
+                                .cornerRadius(10)
+                        } placeholder: {
+                            ProgressView()
+                        }
+                        
                         Text(restaurant.name)
                             .font(.headline)
-                        Text(restaurant.location.address1)
+                        
+                        Text(restaurant.location.displayAddress.joined(separator: ", "))
                             .font(.subheadline)
-                        Text("Rating: \(restaurant.rating)")
+                        
+                        HStack {
+                            Text("Rating: \(restaurant.rating, specifier: "%.1f")")
+                            Text("(\(restaurant.reviewCount) reviews)")
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        if let price = restaurant.price {
+                            Text("Price: \(price)")
+                        }
+                        
+                        Text("Categories: \(restaurant.categories.map { $0.title }.joined(separator: ", "))")
+                        
+                        Text("Phone: \(restaurant.phone)")
+                        
+                        Text(!restaurant.isClosed ? "Open Now" : "Closed")
+                            .foregroundColor(!restaurant.isClosed ? .green : .red)
+                        
+                        Link("View on Yelp", destination: URL(string: restaurant.url)!)
                     }
+                    .padding(.vertical)
                 }
             }
             .navigationTitle("MMG")
