@@ -2,6 +2,13 @@ import SwiftUI
 import EventKit
 
 // MARK: - Models
+struct User: Identifiable {
+    let id = UUID()
+    var name: String
+    var preferences: [String]
+    var friends: [User]
+}
+
 struct YelpResponse: Decodable {
     let businesses: [Restaurant]
 }
@@ -45,10 +52,16 @@ struct Category: Decodable {
 
 // MARK: - ViewModel
 class ContentViewModel: ObservableObject {
+    @Published var currentUser: User?
     @Published var restaurants: [Restaurant] = []
     @Published var availability: [Date] = []
     
     let eventStore = EKEventStore()
+    
+    init() {
+        // Mock user data
+        self.currentUser = User(name: "John Doe", preferences: ["Italian", "Japanese"], friends: [])
+    }
     
     // Request Calendar Access
     func requestCalendarAccess() {
@@ -104,70 +117,123 @@ class ContentViewModel: ObservableObject {
     }
 }
 
-// MARK: - ContentView
+// MARK: - Views
 struct ContentView: View {
     @StateObject private var viewModel = ContentViewModel()
     
     var body: some View {
+        TabView {
+            HomeView()
+                .tabItem {
+                    Label("Home", systemImage: "house")
+                }
+            
+            PlanView()
+                .tabItem {
+                    Label("Plan", systemImage: "calendar")
+                }
+            
+            ProfileView()
+                .tabItem {
+                    Label("Profile", systemImage: "person")
+                }
+        }
+        .environmentObject(viewModel)
+    }
+}
+
+struct HomeView: View {
+    @EnvironmentObject var viewModel: ContentViewModel
+    
+    var body: some View {
         NavigationView {
-            VStack {
-                Text("Available Times")
-                    .font(.title2)
-                    .padding()
-                
-                List(viewModel.availability, id: \.self) { date in
-                    Text(date, style: .date)
+            List(viewModel.restaurants) { restaurant in
+                RestaurantRow(restaurant: restaurant)
+            }
+            .navigationTitle("Restaurants")
+        }
+        .onAppear {
+            viewModel.fetchRestaurants()
+        }
+    }
+}
+
+struct RestaurantRow: View {
+    let restaurant: Restaurant
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AsyncImage(url: URL(string: restaurant.imageUrl)) { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 200)
+                    .cornerRadius(10)
+            } placeholder: {
+                ProgressView()
+            }
+            
+            Text(restaurant.name)
+                .font(.headline)
+            
+            Text(restaurant.location.displayAddress.joined(separator: ", "))
+                .font(.subheadline)
+            
+            HStack {
+                Text("Rating: \(restaurant.rating, specifier: "%.1f")")
+                Text("(\(restaurant.reviewCount) reviews)")
+                    .foregroundColor(.secondary)
+            }
+            
+            if let price = restaurant.price {
+                Text("Price: \(price)")
+            }
+            
+            Text("Categories: \(restaurant.categories.map { $0.title }.joined(separator: ", "))")
+            
+            Text("Phone: \(restaurant.phone)")
+            
+            Text(!restaurant.isClosed ? "Open Now" : "Closed")
+                .foregroundColor(!restaurant.isClosed ? .green : .red)
+            
+            Link("View on Yelp", destination: URL(string: restaurant.url)!)
+        }
+        .padding(.vertical)
+    }
+}
+
+struct PlanView: View {
+    @EnvironmentObject var viewModel: ContentViewModel
+    
+    var body: some View {
+        NavigationView {
+            List(viewModel.availability, id: \.self) { date in
+                Text(date, style: .date)
+            }
+            .navigationTitle("Available Times")
+        }
+        .onAppear {
+            viewModel.requestCalendarAccess()
+        }
+    }
+}
+
+struct ProfileView: View {
+    @EnvironmentObject var viewModel: ContentViewModel
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Personal Info")) {
+                    Text("Name: \(viewModel.currentUser?.name ?? "")")
+                    Text("Preferences: \(viewModel.currentUser?.preferences.joined(separator: ", ") ?? "")")
                 }
                 
-                Text("Restaurant Suggestions in New York")
-                    .font(.title2)
-                    .padding(.top)
-                
-                List(viewModel.restaurants) { restaurant in
-                    VStack(alignment: .leading, spacing: 10) {
-                        AsyncImage(url: URL(string: restaurant.imageUrl)) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(height: 200)
-                                .cornerRadius(10)
-                        } placeholder: {
-                            ProgressView()
-                        }
-                        
-                        Text(restaurant.name)
-                            .font(.headline)
-                        
-                        Text(restaurant.location.displayAddress.joined(separator: ", "))
-                            .font(.subheadline)
-                        
-                        HStack {
-                            Text("Rating: \(restaurant.rating, specifier: "%.1f")")
-                            Text("(\(restaurant.reviewCount) reviews)")
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        if let price = restaurant.price {
-                            Text("Price: \(price)")
-                        }
-                        
-                        Text("Categories: \(restaurant.categories.map { $0.title }.joined(separator: ", "))")
-                        
-                        Text("Phone: \(restaurant.phone)")
-                        
-                        Text(!restaurant.isClosed ? "Open Now" : "Closed")
-                            .foregroundColor(!restaurant.isClosed ? .green : .red)
-                        
-                        Link("View on Yelp", destination: URL(string: restaurant.url)!)
-                    }
-                    .padding(.vertical)
+                Section(header: Text("Friends")) {
+                    Text("Coming soon...")
                 }
             }
-            .navigationTitle("MMG")
-            .onAppear {
-                viewModel.requestCalendarAccess()
-                viewModel.fetchRestaurants()
-            }
+            .navigationTitle("Profile")
         }
     }
 }
