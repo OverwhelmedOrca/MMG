@@ -6,10 +6,14 @@ import Foundation
 struct User: Identifiable {
     let id = UUID()
     var name: String
-    var preferences: [String]
+    var lovedCuisines: [String]
+    var wantToTryCuisines: [String]
+    //var preferences: [String]
     var preferredDays: [Int] // Days of the week (0 for Sunday, etc.)
     var friends: [User]
     var availableTimes: [AvailableTime]
+    var availabilityStartTime: Date
+    var availabilityEndTime: Date
 }
 
 
@@ -116,6 +120,7 @@ enum InvitationStatus {
 // MARK: - ViewModel
 class ContentViewModel: ObservableObject {
     @Published var currentUser: User
+    @Published var users: [User] = [] // All users in the app
     @Published var restaurants: [Restaurant] = []
     //@Published var recommendedOutings: [Restaurant] = []
     @Published var sentInvitations: [Invitation] = []
@@ -126,22 +131,77 @@ class ContentViewModel: ObservableObject {
     let eventStore = EKEventStore()
     
     init() {
+        let calendar = Calendar.current
+                let defaultStart = calendar.date(from: DateComponents(hour: 17, minute: 0))!
+                let defaultEnd = calendar.date(from: DateComponents(hour: 0, minute: 0))!
+         
         // Mock user data
         self.currentUser = User(
             name: "John Doe",
-            preferences: ["Italian", "Japanese"],
+            lovedCuisines: ["Italian", "Japanese"],
+            wantToTryCuisines: ["Thai", "Indian"],
             preferredDays: [5, 6], // For example, prefers Friday and Saturday
             friends: [
-                User(name: "Jane Smith", preferences: ["Mexican", "Italian"],preferredDays: [5, 6], friends: [], availableTimes: []),
-                User(name: "Bob Johnson", preferences: ["Chinese", "Japanese"],preferredDays: [5, 6], friends: [], availableTimes: [])
+                User(name: "Jane Smith", lovedCuisines: ["Mexican", "Italian"], wantToTryCuisines: [],preferredDays: [5, 6], friends: [], availableTimes: [], availabilityStartTime: defaultStart, availabilityEndTime: defaultEnd),
+                User(name: "Bob Johnson", lovedCuisines: ["Chinese", "Japanese"], wantToTryCuisines: [],preferredDays: [5, 6], friends: [], availableTimes: [], availabilityStartTime: defaultStart, availabilityEndTime: defaultEnd)
             ],
-            availableTimes: []
+            availableTimes: [],
+            availabilityStartTime: defaultStart,
+            availabilityEndTime: defaultEnd
         )
+        
+        // Initialize other users
+                let user1 = User(
+                    name: "Alice Williams",
+                    lovedCuisines: ["French", "Thai"],
+                    wantToTryCuisines: ["Korean"],
+                    preferredDays: [5, 6],
+                    friends: [],
+                    availableTimes: [],
+                    availabilityStartTime: defaultStart,
+                    availabilityEndTime: defaultEnd
+                )
+
+                let user2 = User(
+                    name: "David Brown",
+                    lovedCuisines: ["Mexican"],
+                    wantToTryCuisines: ["Indian"],
+                    preferredDays: [4, 5],
+                    friends: [],
+                    availableTimes: [],
+                    availabilityStartTime: defaultStart,
+                    availabilityEndTime: defaultEnd
+                )
+
+                // Add users to the users array
+                self.users = [currentUser, user1, user2]
+
+                // Set up friendships
+                self.currentUser.friends = [user1] // Bob Johnson is not a friend
+                // Update other users' friends if needed
+
+                // Fetch calendar events for all users
+                fetchCalendarEventsForAllUsers()
 
         
         requestCalendarAccess()
         fetchRestaurants()
     }
+    
+    func fetchCalendarEventsForAllUsers() {
+        for index in users.indices {
+            if users[index].id == currentUser.id {
+                // Fetch real calendar events for the current user
+                fetchCalendarEvents(for: &users[index])
+            } else {
+                // Simulate available times for other users
+                users[index].availableTimes = simulateAvailableTimes(for: users[index])
+            }
+        }
+        updateRecommendedOutings()
+    }
+
+    
     
     func requestCalendarAccess() {
         eventStore.requestFullAccessToEvents { [weak self] granted, error in
@@ -186,8 +246,20 @@ class ContentViewModel: ObservableObject {
                         continue
                     }
             
-            let startOfEvening = calendar.date(bySettingHour: 17, minute: 0, second: 0, of: date)!
-            let endOfEvening = calendar.date(bySettingHour: 0, minute: 0, second: 0, of: date.addingTimeInterval(86400))!
+            let startOfEvening = calendar.date(bySettingHour: calendar.component(.hour, from: currentUser.availabilityStartTime),
+                                                           minute: calendar.component(.minute, from: currentUser.availabilityStartTime),
+                                                           second: 0,
+                                                           of: date)!
+                        
+            var endOfEvening = calendar.date(bySettingHour: calendar.component(.hour, from: currentUser.availabilityEndTime),
+                                                         minute: calendar.component(.minute, from: currentUser.availabilityEndTime),
+                                                         second: 0,
+                                                         of: date)!
+                        
+                        if endOfEvening <= startOfEvening {
+                            // If end time is on the next day, add 24 hours
+                            endOfEvening = calendar.date(byAdding: .day, value: 1, to: endOfEvening)!
+                        }
             
             // Filter events for this day
             let dayEvents = events.filter { event in
@@ -216,7 +288,8 @@ class ContentViewModel: ObservableObject {
     
     func fetchRestaurants() {
         let apiKey = "tuhu5KX82xiVBfNPwQeC0n-vesx7mDDo1OJul7PPmqsrDMrigjc2eDMp0CSamwUkUricjlrRooufMt8UpBMjGHiEN1d22708MvVnFCd99ClkkRCkl185umQwX28LZ3Yx"
-        let url = URL(string: "https://api.yelp.com/v3/businesses/search?location=New+York&term=restaurants&open_now=true")!
+        let location = "New+York" // Replace this with dynamic location
+        let url = URL(string: "https://api.yelp.com/v3/businesses/search?location=\(location)&term=restaurants&open_now=true")!
         
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -292,7 +365,7 @@ class ContentViewModel: ObservableObject {
     func updateRecommendedOutings() {
         print("Updating recommended outings...")
         print("Total restaurants: \(restaurants.count)")
-        print("User preferences: \(currentUser.preferences)")
+        print("User preferences: \(currentUser.lovedCuisines + currentUser.wantToTryCuisines)")
         print("User available times: \(currentUser.availableTimes)")
 
         // Clear previous recommendations
@@ -339,9 +412,11 @@ class ContentViewModel: ObservableObject {
                     return latestStart < earliestEnd
                 }
 
-                let matchesPreferences = restaurant.categories.contains { category in
-                    currentUser.preferences.contains(category.title)
-                }
+                let userPreferences = currentUser.lovedCuisines + currentUser.wantToTryCuisines
+
+                            let matchesPreferences = restaurant.categories.contains { category in
+                                userPreferences.contains(category.title)
+                            }
 
                 return isAvailable && matchesPreferences
             }
@@ -421,29 +496,15 @@ struct HomeView: View {
 
     var body: some View {
         NavigationView {
-            List {
-                ForEach(groupedOutings.keys.sorted(), id: \.self) { date in
-                    Section(header: Text("\(date, formatter: dateFormatter)")) {
-                        ForEach(groupedOutings[date]!) { outing in
-                            RestaurantCard(outing: outing)
-                        }
-                    }
+            TabView {
+                ForEach(viewModel.recommendedOutings) { outing in
+                    RestaurantCard(outing: outing)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .navigationTitle("Recommended Outings")
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            .navigationBarHidden(true)
         }
-    }
-
-    var groupedOutings: [Date: [RecommendedOuting]] {
-        Dictionary(grouping: viewModel.recommendedOutings) { outing in
-            Calendar.current.startOfDay(for: outing.date)
-        }
-    }
-
-    var dateFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .full
-        return formatter
     }
 }
 
@@ -454,72 +515,93 @@ struct RestaurantCard: View {
     @State private var showingInviteSheet = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Restaurant Image
-            AsyncImage(url: URL(string: outing.restaurant.imageUrl)) { image in
-                image.resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Color.gray
-            }
-            .frame(height: 200)
-            .cornerRadius(10)
-
-            // Restaurant Name
-            Text(outing.restaurant.name)
-                .font(.headline)
-
-            // Rating and Reviews
-            HStack {
-                ForEach(0..<Int(outing.restaurant.rating.rounded())) { _ in
-                    Image(systemName: "star.fill")
-                        .foregroundColor(.yellow)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                // Restaurant Image
+                AsyncImage(url: URL(string: outing.restaurant.imageUrl)) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.gray
                 }
-                Text("(\(outing.restaurant.reviewCount) reviews)")
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
-            }
-
-            // Categories
-            Text("Categories: \(outing.restaurant.categories.map { $0.title }.joined(separator: ", "))")
-                .font(.subheadline)
-
-            // Price
-            if let price = outing.restaurant.price {
-                Text("Price: \(price)")
-                    .font(.subheadline)
-            }
-
-            // Address
-            Text("Address: \(outing.restaurant.location.displayAddress.joined(separator: ", "))")
-                .font(.subheadline)
-
-            // Open Now
-            if let businessHours = outing.restaurant.businessHours?.first {
-                let isOpenNow = businessHours.isOpenNow ? "Yes" : "No"
-                Text("Open Now: \(isOpenNow)")
-                    .font(.subheadline)
-            }
-
-            // Outing Date
-            Text("Date: \(outing.date, formatter: dateFormatter)")
-                .font(.subheadline)
-
-            // Action Buttons
-            HStack {
-                Button("Invite Group") {
-                    showingInviteSheet = true
-                }
-                .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
+                .frame(height: 400) // Adjust height as needed
+                .clipped()
                 .cornerRadius(10)
+                
+                // Restaurant Name
+                Text(outing.restaurant.name)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                // Rating and Reviews
+                HStack {
+                    ForEach(0..<Int(outing.restaurant.rating.rounded()), id: \.self) { _ in
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                    }
+                    Text("(\(outing.restaurant.reviewCount) reviews)")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+                
+                // Categories and Price
+                HStack {
+                    Text(outing.restaurant.categories.map { $0.title }.joined(separator: ", "))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    if let price = outing.restaurant.price {
+                        Text(price)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                // Address
+                Text(outing.restaurant.location.displayAddress.joined(separator: ", "))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                // Open Now
+                if let businessHours = outing.restaurant.businessHours?.first {
+                    Text("Open Now: \(businessHours.isOpenNow ? "Yes" : "No")")
+                        .font(.subheadline)
+                        .foregroundColor(businessHours.isOpenNow ? .green : .red)
+                }
+                
+                // Outing Date
+                Text("Date: \(outing.date, formatter: dateFormatter)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                // Action Buttons
+                HStack {
+                    Button("Invite Group") {
+                        showingInviteSheet = true
+                    }
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                    
+                    Button(action: {
+                        if let url = URL(string: outing.restaurant.url) {
+                            UIApplication.shared.open(url)
+                        }
+                    }) {
+                        Text("View on Yelp")
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.green)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                    }
 
-                Link("View on Yelp", destination: URL(string: outing.restaurant.url)!)
                     .padding()
                     .background(Color.green)
                     .foregroundColor(.white)
                     .cornerRadius(10)
+                }
             }
         }
         .padding()
@@ -538,7 +620,6 @@ struct RestaurantCard: View {
         return formatter
     }
 }
-
 struct InviteView: View {
     let outing: RecommendedOuting
     @EnvironmentObject var viewModel: ContentViewModel
@@ -585,14 +666,18 @@ struct MultipleSelectionRow: View {
         Button(action: self.action) {
             HStack {
                 Text(self.title)
+                    .foregroundColor(.primary)
+                Spacer()
                 if self.isSelected {
-                    Spacer()
                     Image(systemName: "checkmark")
+                        .foregroundColor(.blue)
                 }
             }
+            .contentShape(Rectangle())
         }
     }
 }
+
 
 struct InvitationsView: View {
     @EnvironmentObject var viewModel: ContentViewModel
@@ -650,6 +735,7 @@ struct ProfileView: View {
     @EnvironmentObject var viewModel: ContentViewModel
         @State private var selectedDays: [Int] = []
         @State private var preferencesText: String = ""
+        @State private var showingPreferences = false  // Add this line
     
     var body: some View {
         NavigationView {
@@ -657,14 +743,31 @@ struct ProfileView: View {
                 Section(header: Text("Personal Info")) {
                                     Text("Name: \(viewModel.currentUser.name)")
 
-                                    TextField("Preferences (comma-separated)", text: $preferencesText)
-                                        .onAppear {
-                                            preferencesText = viewModel.currentUser.preferences.joined(separator: ", ")
-                                        }
-                                        .onChange(of: preferencesText) { newValue in
-                                            viewModel.currentUser.preferences = newValue.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-                                            viewModel.updateRecommendedOutings()
-                                        }
+                                    Button(action: {
+                                        showingPreferences = true
+                                    }) {
+                                        Text("Edit Preferences")
+                                    }
+                                    .sheet(isPresented: $showingPreferences) {
+                                        PreferencesView()
+                                    }
+                                }
+                Section(header: Text("Cuisines I Love")) {
+                                    if viewModel.currentUser.lovedCuisines.isEmpty {
+                                        Text("No cuisines selected")
+                                            .foregroundColor(.gray)
+                                    } else {
+                                        Text(viewModel.currentUser.lovedCuisines.joined(separator: ", "))
+                                    }
+                                }
+
+                                Section(header: Text("Cuisines I Want to Try")) {
+                                    if viewModel.currentUser.wantToTryCuisines.isEmpty {
+                                        Text("No cuisines selected")
+                                            .foregroundColor(.gray)
+                                    } else {
+                                        Text(viewModel.currentUser.wantToTryCuisines.joined(separator: ", "))
+                                    }
                                 }
                 Section(header: Text("Preferred Days")) {
                                     ForEach(0..<7) { day in
@@ -700,6 +803,16 @@ struct ProfileView: View {
                         Text(friend.name)
                     }
                 }
+                Section(header: Text("Availability Time Range")) {
+                                    DatePicker("Start Time", selection: $viewModel.currentUser.availabilityStartTime, displayedComponents: .hourAndMinute)
+                                    DatePicker("End Time", selection: $viewModel.currentUser.availabilityEndTime, displayedComponents: .hourAndMinute)
+                                }
+                                .onChange(of: viewModel.currentUser.availabilityStartTime) { _ in
+                                    viewModel.fetchCalendarEvents()
+                                }
+                                .onChange(of: viewModel.currentUser.availabilityEndTime) { _ in
+                                    viewModel.fetchCalendarEvents()
+                                }
             }
             .navigationTitle("Profile")
         }
@@ -715,6 +828,73 @@ struct ProfileView: View {
         formatter.timeStyle = .short
         return formatter.string(from: date)
     }
+}
 
+struct PreferencesView: View {
+    @EnvironmentObject var viewModel: ContentViewModel
+    @Environment(\.presentationMode) var presentationMode
+
+    @State private var lovedCuisines: Set<String> = []
+    @State private var wantToTryCuisines: Set<String> = []
+
+    let cuisines = [
+        "Italian", "Japanese", "Chinese", "Mexican", "French", "Thai", "Indian", "Greek",
+        "Mediterranean", "Spanish", "Vietnamese", "Korean", "American", "Lebanese",
+        "Turkish", "German", "Caribbean", "Brazilian", "Ethiopian", "Moroccan"
+    ]
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section(header: Text("I LOVE")) {
+                    ForEach(cuisines, id: \.self) { cuisine in
+                        MultipleSelectionRow(title: cuisine, isSelected: lovedCuisines.contains(cuisine)) {
+                            if lovedCuisines.contains(cuisine) {
+                                lovedCuisines.remove(cuisine)
+                            } else {
+                                lovedCuisines.insert(cuisine)
+                                wantToTryCuisines.remove(cuisine) // Ensure no duplicates
+                            }
+                        }
+                    }
+                }
+
+                Section(header: Text("I have never had")) {
+                    ForEach(cuisines, id: \.self) { cuisine in
+                        MultipleSelectionRow(title: cuisine, isSelected: wantToTryCuisines.contains(cuisine)) {
+                            if wantToTryCuisines.contains(cuisine) {
+                                wantToTryCuisines.remove(cuisine)
+                            } else {
+                                wantToTryCuisines.insert(cuisine)
+                                lovedCuisines.remove(cuisine) // Ensure no duplicates
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Cuisines")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        // Save the selections to currentUser
+                        viewModel.currentUser.lovedCuisines = Array(lovedCuisines)
+                        viewModel.currentUser.wantToTryCuisines = Array(wantToTryCuisines)
+                        // Update recommendations
+                        viewModel.updateRecommendedOutings()
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                lovedCuisines = Set(viewModel.currentUser.lovedCuisines)
+                wantToTryCuisines = Set(viewModel.currentUser.wantToTryCuisines)
+            }
+        }
+    }
 }
 
