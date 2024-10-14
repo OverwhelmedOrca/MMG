@@ -762,18 +762,35 @@ struct HomeView: View {
 
     var body: some View {
         NavigationView {
-            GeometryReader { geometry in
-                TabView {
-                    ForEach(viewModel.recommendedOutings) { outing in
-                        RestaurantCard(outing: outing)
-                            .frame(width: geometry.size.width, height: geometry.size.height)
+            ZStack {
+                Color(.systemBackground).edgesIgnoringSafeArea(.all)
+                
+                VStack(spacing: 0) {
+                    // Top Picks Header
+                    Text("Our Top Picks")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.top, 20)
+                        .background(
+                            LinearGradient(gradient: Gradient(colors: [Color.blue.opacity(0.3), Color.clear]), startPoint: .top, endPoint: .bottom)
+                        )
+                    
+                    // Restaurant Cards
+                    GeometryReader { geometry in
+                        TabView {
+                            ForEach(viewModel.recommendedOutings) { outing in
+                                RestaurantCard(outing: outing)
+                                    .frame(width: geometry.size.width - 40, height: geometry.size.height - 100)
+                                    .padding(.bottom, 20)
+                            }
+                        }
+                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
                     }
                 }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .navigationBarHidden(true)
-            .edgesIgnoringSafeArea(.all)
         }
     }
 }
@@ -785,89 +802,114 @@ struct RestaurantCard: View {
     @State private var showingInviteSheet = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Restaurant Image
-            AsyncImage(url: URL(string: outing.restaurant.imageUrl)) { image in
-                image.resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Color.gray
-            }
-            .frame(height: 200)
-            .clipped()
-            .cornerRadius(10)
-
-            // Restaurant Name
-            Text(outing.restaurant.name)
-                .font(.title2)
-                .fontWeight(.bold)
-
-            // Rating and Reviews
-            HStack {
-                ForEach(0..<Int(outing.restaurant.rating.rounded()), id: \.self) { _ in
-                    Image(systemName: "star.fill")
-                        .foregroundColor(.yellow)
+        ZStack {
+            RoundedRectangle(cornerRadius: 25)
+                .fill(LinearGradient(gradient: Gradient(colors: [Color.white, Color.gray.opacity(0.2)]), startPoint: .top, endPoint: .bottom))
+                .shadow(color: Color.black.opacity(0.2), radius: 15, x: 0, y: 10)
+            
+            VStack(alignment: .leading, spacing: 15) {
+                // Restaurant Image
+                AsyncImage(url: URL(string: outing.restaurant.imageUrl)) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.gray
                 }
-                Text("(\(outing.restaurant.reviewCount) reviews)")
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
-            }
+                .frame(height: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.white, lineWidth: 4)
+                )
+                .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
 
-            // Categories and Price
-            HStack {
-                Text(outing.restaurant.categories.map { $0.title }.joined(separator: ", "))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Spacer()
-                if let price = outing.restaurant.price {
-                    Text(price)
+                // Restaurant Name
+                Text(outing.restaurant.name)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+
+                // Rating and Reviews
+                HStack {
+                    ForEach(0..<Int(outing.restaurant.rating.rounded()), id: \.self) { _ in
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                    }
+                    Text("(\(outing.restaurant.reviewCount) reviews)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-            }
 
-            // Address
-            Text(outing.restaurant.location.displayAddress.joined(separator: ", "))
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-
-            // Open Now
-            if let businessHours = outing.restaurant.businessHours?.first {
-                Text("Open Now: \(businessHours.isOpenNow ? "Yes" : "No")")
-                    .font(.subheadline)
-                    .foregroundColor(businessHours.isOpenNow ? .green : .red)
-            }
-
-            // Outing Date
-            Text("Date: \(outing.date, formatter: dateFormatter)")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-
-            // Action Buttons
-            HStack {
-                Button("Invite Group") {
-                    showingInviteSheet = true
-                }
-                .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(10)
-
-                Button("View on Yelp") {
-                    if let url = URL(string: outing.restaurant.url) {
-                        UIApplication.shared.open(url)
+                // Categories and Price
+                HStack {
+                    Text(outing.restaurant.categories.map { $0.title }.joined(separator: ", "))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    if let price = outing.restaurant.price {
+                        Text(price)
+                            .font(.subheadline)
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.green.opacity(0.2))
+                            .cornerRadius(8)
                     }
                 }
-                .padding()
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(10)
+
+                // Address
+                Text(outing.restaurant.location.displayAddress.joined(separator: ", "))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+
+                // Open Now
+                if let businessHours = outing.restaurant.businessHours?.first {
+                    Text("Open Now: \(businessHours.isOpenNow ? "Yes" : "No")")
+                        .font(.subheadline)
+                        .foregroundColor(businessHours.isOpenNow ? .green : .red)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(businessHours.isOpenNow ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+                        .cornerRadius(8)
+                }
+
+                // Outing Date
+                Text("Date: \(outing.date, formatter: dateFormatter)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                // Action Buttons
+                HStack(spacing: 20) {
+                    Button(action: {
+                        showingInviteSheet = true
+                    }) {
+                        Text("Invite Group")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(15)
+                    }
+                    
+                    Button(action: {
+                        if let url = URL(string: outing.restaurant.url) {
+                            UIApplication.shared.open(url)
+                        }
+                    }) {
+                        Text("View on Yelp")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.purple)
+                            .foregroundColor(.white)
+                            .cornerRadius(15)
+                    }
+                }
             }
+            .padding()
         }
-        .padding()
-        .background(Color(UIColor.systemBackground))
-        .cornerRadius(15)
-        .shadow(radius: 5)
         .sheet(isPresented: $showingInviteSheet) {
             InviteView(outing: outing)
         }
@@ -880,7 +922,6 @@ struct RestaurantCard: View {
         return formatter
     }
 }
-   
 
 struct InviteView: View {
     let outing: RecommendedOuting
@@ -1090,17 +1131,138 @@ struct InvitationsView: View {
             List {
                 Section(header: Text("Received Invitations")) {
                     ForEach(viewModel.receivedInvitations) { invitation in
-                        InvitationRow(invitation: invitation)
+                        ReceivedInvitationRow(invitation: invitation)
                     }
                 }
                 
                 Section(header: Text("Sent Invitations")) {
                     ForEach(viewModel.sentInvitations) { invitation in
-                        Text("\(invitation.restaurant.name) - \(invitation.proposedStartTime, style: .date)")
+                        SentInvitationRow(invitation: invitation)
                     }
                 }
             }
             .navigationTitle("Invitations")
+        }
+    }
+}
+
+struct ReceivedInvitationRow: View {
+    let invitation: Invitation
+    @EnvironmentObject var viewModel: ContentViewModel
+    @State private var showingForwardView = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(invitation.from.name) invited you to \(invitation.restaurant.name)")
+                .font(.headline)
+            Text("Time: \(formatDateTime(invitation.proposedStartTime)) - \(formatTime(invitation.proposedEndTime))")
+            
+            DisclosureGroup("Participants (\(invitation.participants.count))") {
+                ForEach(invitation.participants) { participant in
+                    HStack {
+                        Text(participant.user.name)
+                        Spacer()
+                        Text(participant.response.rawValue)
+                            .foregroundColor(colorForStatus(participant.response))
+                    }
+                }
+            }
+            
+            HStack {
+                Button("Accept") {
+                    viewModel.respondToInvitation(invitation, user: viewModel.currentUser, accept: true)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                
+                Button("Decline") {
+                    viewModel.respondToInvitation(invitation, user: viewModel.currentUser, accept: false)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                
+                if invitation.enableForwarding {
+                    Button("Forward") {
+                        showingForwardView = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                }
+            }
+        }
+        .padding()
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(10)
+        .sheet(isPresented: $showingForwardView) {
+            ForwardInvitationView(invitation: invitation)
+        }
+    }
+
+    func formatDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    func colorForStatus(_ status: InvitationStatus) -> Color {
+        switch status {
+        case .accepted: return .green
+        case .declined: return .red
+        case .pending: return .orange
+        }
+    }
+}
+
+struct SentInvitationRow: View {
+    let invitation: Invitation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(invitation.restaurant.name)")
+                .font(.headline)
+            Text("Time: \(formatDateTime(invitation.proposedStartTime)) - \(formatTime(invitation.proposedEndTime))")
+            
+            DisclosureGroup("Participants (\(invitation.participants.count))") {
+                ForEach(invitation.participants) { participant in
+                    HStack {
+                        Text(participant.user.name)
+                        Spacer()
+                        Text(participant.response.rawValue)
+                            .foregroundColor(colorForStatus(participant.response))
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(10)
+    }
+
+    func formatDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    func colorForStatus(_ status: InvitationStatus) -> Color {
+        switch status {
+        case .accepted: return .green
+        case .declined: return .red
+        case .pending: return .orange
         }
     }
 }
@@ -1179,100 +1341,227 @@ struct InvitationRow: View {
 
 struct ProfileView: View {
     @EnvironmentObject var viewModel: ContentViewModel
-        @State private var selectedDays: [Int] = []
-        @State private var preferencesText: String = ""
-        @State private var showingPreferences = false  // Add this line
-    
+    @State private var showingPreferences = false
+
     var body: some View {
         NavigationView {
-            Form {
-                Section(header: Text("Personal Info")) {
-                                    Text("Name: \(viewModel.currentUser.name)")
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Profile Header
+                    VStack {
+                        Image(systemName: "person.circle.fill")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 100, height: 100)
+                            .foregroundColor(.blue)
+                        
+                        Text(viewModel.currentUser.name)
+                            .font(.title)
+                            .fontWeight(.bold)
+                    }
+                    .padding()
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(20)
 
-                                    Button(action: {
-                                        showingPreferences = true
-                                    }) {
-                                        Text("Edit Preferences")
-                                    }
-                                    .sheet(isPresented: $showingPreferences) {
-                                        PreferencesView()
-                                    }
-                                }
-                Section(header: Text("Cuisines I Love")) {
-                                    if viewModel.currentUser.lovedCuisines.isEmpty {
-                                        Text("No cuisines selected")
-                                            .foregroundColor(.gray)
-                                    } else {
-                                        Text(viewModel.currentUser.lovedCuisines.joined(separator: ", "))
-                                    }
-                                }
+                    // Cuisine Preferences
+                    PreferenceSection(title: "Favorite Cuisines", cuisines: viewModel.currentUser.lovedCuisines)
+                    PreferenceSection(title: "Want to Try", cuisines: viewModel.currentUser.wantToTryCuisines)
 
-                                Section(header: Text("Cuisines I Want to Try")) {
-                                    if viewModel.currentUser.wantToTryCuisines.isEmpty {
-                                        Text("No cuisines selected")
-                                            .foregroundColor(.gray)
-                                    } else {
-                                        Text(viewModel.currentUser.wantToTryCuisines.joined(separator: ", "))
-                                    }
-                                }
-                Section(header: Text("Preferred Days")) {
-                                    ForEach(0..<7) { day in
-                                        Toggle(isOn: Binding(
-                                            get: { viewModel.currentUser.preferredDays.contains(day) },
-                                            set: { isSelected in
-                                                if isSelected {
-                                                    viewModel.currentUser.preferredDays.append(day)
-                                                } else {
-                                                    viewModel.currentUser.preferredDays.removeAll { $0 == day }
-                                                }
-                                                // Update available times and recommendations
-                                                viewModel.fetchCalendarEvents()
-                                            }
-                                        )) {
-                                            Text(dayName(for: day))
+                    // Preferred Days
+                    VStack(alignment: .leading) {
+                        Text("Preferred Days")
+                            .font(.headline)
+                        
+                        HStack {
+                            ForEach(0..<7) { day in
+                                VStack {
+                                    Text(dayAbbreviation(for: day))
+                                        .font(.caption)
+                                    Circle()
+                                        .fill(viewModel.currentUser.preferredDays.contains(day) ? Color.blue : Color.gray.opacity(0.3))
+                                        .frame(width: 30, height: 30)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color.blue, lineWidth: 2)
+                                        )
+                                        .onTapGesture {
+                                            togglePreferredDay(day)
                                         }
-                                    }
                                 }
-                
-                Section(header: Text("Available Times")) {
-                    ForEach(viewModel.currentUser.availableTimes) { time in
-                        VStack(alignment: .leading) {
-                            Text("Day: \(dayName(for: time.weekday))")
-                            Text("Start: \(formatTime(time.startTime))")
-                            Text("End: \(formatTime(time.endTime))")
+                            }
                         }
                     }
-                }
-                
-                Section(header: Text("Friends")) {
-                    ForEach(viewModel.currentUser.friends) { friend in
-                        Text(friend.name)
+                    .padding()
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(20)
+
+                    // Availability Time Range
+                    VStack(alignment: .leading) {
+                        Text("Availability Time Range")
+                            .font(.headline)
+                        
+                        HStack {
+                            DatePicker("Start Time", selection: $viewModel.currentUser.availabilityStartTime, displayedComponents: .hourAndMinute)
+                            DatePicker("End Time", selection: $viewModel.currentUser.availabilityEndTime, displayedComponents: .hourAndMinute)
+                        }
                     }
+                    .padding()
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(20)
+
+                    // Available Times from Calendar
+                    VStack(alignment: .leading) {
+                        Text("Available Times")
+                            .font(.headline)
+                        
+                        ForEach(viewModel.currentUser.availableTimes) { time in
+                            HStack {
+                                Text("\(dayName(for: time.weekday))")
+                                Spacer()
+                                Text("\(formatTime(time.startTime)) - \(formatTime(time.endTime))")
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .padding()
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(20)
+
+                    // Friends
+                    VStack(alignment: .leading) {
+                        Text("Friends")
+                            .font(.headline)
+                        
+                        ForEach(viewModel.currentUser.friends) { friend in
+                            Text(friend.name)
+                                .padding(.vertical, 4)
+                        }
+                    }
+                    .padding()
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(20)
+
+                    // Edit Preferences Button
+                    Button(action: {
+                        showingPreferences = true
+                    }) {
+                        Text("Edit Preferences")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(15)
+                    }
+                    .padding(.horizontal)
                 }
-                Section(header: Text("Availability Time Range")) {
-                                    DatePicker("Start Time", selection: $viewModel.currentUser.availabilityStartTime, displayedComponents: .hourAndMinute)
-                                    DatePicker("End Time", selection: $viewModel.currentUser.availabilityEndTime, displayedComponents: .hourAndMinute)
-                                }
-                                .onChange(of: viewModel.currentUser.availabilityStartTime) { _ in
-                                    viewModel.fetchCalendarEvents()
-                                }
-                                .onChange(of: viewModel.currentUser.availabilityEndTime) { _ in
-                                    viewModel.fetchCalendarEvents()
-                                }
+                .padding()
             }
             .navigationTitle("Profile")
+            .sheet(isPresented: $showingPreferences) {
+                PreferencesView()
+            }
+        }
+        .onChange(of: viewModel.currentUser.availabilityStartTime) { _ in
+            viewModel.fetchCalendarEvents()
+        }
+        .onChange(of: viewModel.currentUser.availabilityEndTime) { _ in
+            viewModel.fetchCalendarEvents()
         }
     }
-    
+
+    func dayAbbreviation(for day: Int) -> String {
+        let days = ["S", "M", "T", "W", "T", "F", "S"]
+        return days[day]
+    }
+
     func dayName(for weekday: Int) -> String {
         let days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
         return days[weekday]
     }
-    
+
     func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    func togglePreferredDay(_ day: Int) {
+        if viewModel.currentUser.preferredDays.contains(day) {
+            viewModel.currentUser.preferredDays.removeAll { $0 == day }
+        } else {
+            viewModel.currentUser.preferredDays.append(day)
+        }
+        viewModel.fetchCalendarEvents()
+    }
+}
+
+
+struct PreferenceSection: View {
+    let title: String
+    let cuisines: [String]
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(title)
+                .font(.headline)
+            
+            FlowLayout(spacing: 8) {
+                ForEach(cuisines, id: \.self) { cuisine in
+                    Text(cuisine)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.green.opacity(0.2))
+                        .foregroundColor(.green)
+                        .cornerRadius(10)
+                }
+            }
+        }
+        .padding()
+        .background(Color.secondary.opacity(0.1))
+        .cornerRadius(20)
+    }
+}
+
+
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        return layout(sizes: sizes, proposal: proposal).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let offsets = layout(sizes: sizes, proposal: proposal).offsets
+
+        for (offset, subview) in zip(offsets, subviews) {
+            subview.place(at: CGPoint(x: bounds.minX + offset.x, y: bounds.minY + offset.y), proposal: .unspecified)
+        }
+    }
+
+    private func layout(sizes: [CGSize], proposal: ProposedViewSize) -> (offsets: [CGPoint], size: CGSize) {
+        guard let containerWidth = proposal.width else { return ([], .zero) }
+
+        var result: [CGPoint] = []
+        var currentPosition: CGPoint = .zero
+        var lineHeight: CGFloat = 0
+
+        for size in sizes {
+            if currentPosition.x + size.width > containerWidth {
+                currentPosition.x = 0
+                currentPosition.y += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            result.append(currentPosition)
+            currentPosition.x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+
+        return (result, CGSize(width: containerWidth, height: currentPosition.y + lineHeight))
     }
 }
 
@@ -1350,16 +1639,23 @@ struct UpcomingEventsView: View {
         NavigationView {
             List {
                 ForEach(viewModel.upcomingEvents) { event in
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(event.restaurant.name)
                             .font(.headline)
-                        Text("Date: \(event.proposedStartTime, formatter: dateFormatter)")
-                        DisclosureGroup("Participants") {
-                            ForEach(event.to) { user in
-                                Text(user.name)
+                        Text("Date: \(event.proposedStartTime, formatter: dateFormatter) - \(event.proposedEndTime, formatter: timeFormatter)")
+                        
+                        DisclosureGroup("Participants (\(event.participants.count))") {
+                            ForEach(event.participants) { participant in
+                                HStack {
+                                    Text(participant.user.name)
+                                    Spacer()
+                                    Text(participant.response.rawValue)
+                                        .foregroundColor(colorForStatus(participant.response))
+                                }
                             }
                         }
                     }
+                    .padding(.vertical, 8)
                 }
             }
             .navigationTitle("Upcoming Events")
@@ -1368,9 +1664,24 @@ struct UpcomingEventsView: View {
 
     var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
-        formatter.dateStyle = .full
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }
+
+    var timeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
         formatter.timeStyle = .short
         return formatter
+    }
+
+    func colorForStatus(_ status: InvitationStatus) -> Color {
+        switch status {
+        case .accepted: return .green
+        case .declined: return .red
+        case .pending: return .orange
+        }
     }
 }
 struct ForwardInvitationView: View {
