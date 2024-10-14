@@ -7,9 +7,11 @@ struct User: Identifiable {
     let id = UUID()
     var name: String
     var preferences: [String]
+    var preferredDays: [Int] // Days of the week (0 for Sunday, etc.)
     var friends: [User]
     var availableTimes: [AvailableTime]
 }
+
 
 struct YelpResponse: Decodable {
     let businesses: [Restaurant]
@@ -101,6 +103,11 @@ struct Invitation: Identifiable {
     let proposedTime: Date
     var status: InvitationStatus = .pending
 }
+struct RecommendedOuting: Identifiable {
+    let id = UUID()
+    let restaurant: Restaurant
+    let date: Date
+}
 
 enum InvitationStatus {
     case pending, accepted, declined
@@ -110,9 +117,11 @@ enum InvitationStatus {
 class ContentViewModel: ObservableObject {
     @Published var currentUser: User
     @Published var restaurants: [Restaurant] = []
-    @Published var recommendedOutings: [Restaurant] = []
+    //@Published var recommendedOutings: [Restaurant] = []
     @Published var sentInvitations: [Invitation] = []
     @Published var receivedInvitations: [Invitation] = []
+    @Published var recommendedOutings: [RecommendedOuting] = []
+
     
     let eventStore = EKEventStore()
     
@@ -121,12 +130,14 @@ class ContentViewModel: ObservableObject {
         self.currentUser = User(
             name: "John Doe",
             preferences: ["Italian", "Japanese"],
+            preferredDays: [5, 6], // For example, prefers Friday and Saturday
             friends: [
-                User(name: "Jane Smith", preferences: ["Mexican", "Italian"], friends: [], availableTimes: []),
-                User(name: "Bob Johnson", preferences: ["Chinese", "Japanese"], friends: [], availableTimes: [])
+                User(name: "Jane Smith", preferences: ["Mexican", "Italian"],preferredDays: [5, 6], friends: [], availableTimes: []),
+                User(name: "Bob Johnson", preferences: ["Chinese", "Japanese"],preferredDays: [5, 6], friends: [], availableTimes: [])
             ],
             availableTimes: []
         )
+
         
         requestCalendarAccess()
         fetchRestaurants()
@@ -169,6 +180,11 @@ class ContentViewModel: ObservableObject {
         for dayOffset in 0...6 {
             let date = calendar.date(byAdding: .day, value: dayOffset, to: now)!
             let weekday = calendar.component(.weekday, from: date) - 1 // 0-6, where 0 is Sunday
+            
+            // Check if the day is in preferredDays
+                    if !currentUser.preferredDays.contains(weekday) {
+                        continue
+                    }
             
             let startOfEvening = calendar.date(bySettingHour: 17, minute: 0, second: 0, of: date)!
             let endOfEvening = calendar.date(bySettingHour: 0, minute: 0, second: 0, of: date.addingTimeInterval(86400))!
@@ -279,21 +295,23 @@ class ContentViewModel: ObservableObject {
         print("User preferences: \(currentUser.preferences)")
         print("User available times: \(currentUser.availableTimes)")
 
-        recommendedOutings = restaurants.filter { restaurant in
-            guard let businessHours = restaurant.businessHours?.first else {
-                print("No business hours for \(restaurant.name)")
-                return false
-            }
+        // Clear previous recommendations
+        recommendedOutings.removeAll()
 
-            let openHours = businessHours.open
+        for availableTime in currentUser.availableTimes {
+            let dayRecommendations = restaurants.filter { restaurant in
+                guard let businessHours = restaurant.businessHours?.first else {
+                    print("No business hours for \(restaurant.name)")
+                    return false
+                }
 
-            let isAvailable = currentUser.availableTimes.contains { availableTime in
-                openHours.contains { openHour in
+                let openHours = businessHours.open
+
+                let isAvailable = openHours.contains { openHour in
                     // Convert openHour.start and openHour.end to minutes since midnight
                     let restaurantStartMinutes = (Int(openHour.start.prefix(2)) ?? 0) * 60 + (Int(openHour.start.suffix(2)) ?? 0)
                     var restaurantEndMinutes = (Int(openHour.end.prefix(2)) ?? 0) * 60 + (Int(openHour.end.suffix(2)) ?? 0)
 
-                    // Adjust end minutes if less than or equal to start minutes
                     if restaurantEndMinutes <= restaurantStartMinutes {
                         restaurantEndMinutes += 24 * 60 // Adjust for overnight or midnight closing
                     }
@@ -302,7 +320,6 @@ class ContentViewModel: ObservableObject {
                     let userStartMinutes = Calendar.current.component(.hour, from: availableTime.startTime) * 60 + Calendar.current.component(.minute, from: availableTime.startTime)
                     var userEndMinutes = Calendar.current.component(.hour, from: availableTime.endTime) * 60 + Calendar.current.component(.minute, from: availableTime.endTime)
 
-                    // Adjust user end minutes if less than or equal to start minutes
                     if userEndMinutes <= userStartMinutes {
                         userEndMinutes += 24 * 60 // Adjust for overnight availability
                     }
@@ -319,33 +336,23 @@ class ContentViewModel: ObservableObject {
                     let latestStart = max(restaurantStartMinutes, userStartMinutes)
                     let earliestEnd = min(restaurantEndMinutes, userEndMinutes)
 
-                    let isOpen = latestStart < earliestEnd
-
-                    if isOpen {
-                        let startHour = latestStart / 60
-                        let startMinute = latestStart % 60
-                        let endHour = earliestEnd / 60
-                        let endMinute = earliestEnd % 60
-                        print("\(restaurant.name) is open on day \(openHour.day) from \(startHour):\(String(format: "%02d", startMinute)) to \(endHour):\(String(format: "%02d", endMinute))")
-                    }
-
-                    return isOpen
+                    return latestStart < earliestEnd
                 }
+
+                let matchesPreferences = restaurant.categories.contains { category in
+                    currentUser.preferences.contains(category.title)
+                }
+
+                return isAvailable && matchesPreferences
             }
 
-            let matchesPreferences = restaurant.categories.contains { category in
-                currentUser.preferences.contains(category.title)
+            // For each recommended restaurant, create a struct that includes the date
+            let outingsForDay = dayRecommendations.map { restaurant in
+                RecommendedOuting(restaurant: restaurant, date: availableTime.date)
             }
 
-            if isAvailable && matchesPreferences {
-                print("\(restaurant.name) matches availability and preferences")
-            } else if !isAvailable {
-                print("\(restaurant.name) doesn't match availability")
-            } else if !matchesPreferences {
-                print("\(restaurant.name) doesn't match preferences")
-            }
-
-            return isAvailable && matchesPreferences
+            // Append to recommendedOutings
+            recommendedOutings.append(contentsOf: outingsForDay)
         }
 
         print("Found \(recommendedOutings.count) recommended outings")
@@ -411,30 +418,45 @@ struct ContentView: View {
 
 struct HomeView: View {
     @EnvironmentObject var viewModel: ContentViewModel
-    
+
     var body: some View {
         NavigationView {
-            ScrollView {
-                LazyVStack(spacing: 20) {
-                    ForEach(viewModel.recommendedOutings) { restaurant in
-                        RestaurantCard(restaurant: restaurant)
+            List {
+                ForEach(groupedOutings.keys.sorted(), id: \.self) { date in
+                    Section(header: Text("\(date, formatter: dateFormatter)")) {
+                        ForEach(groupedOutings[date]!) { outing in
+                            RestaurantCard(outing: outing)
+                        }
                     }
                 }
-                .padding()
             }
             .navigationTitle("Recommended Outings")
         }
     }
+
+    var groupedOutings: [Date: [RecommendedOuting]] {
+        Dictionary(grouping: viewModel.recommendedOutings) { outing in
+            Calendar.current.startOfDay(for: outing.date)
+        }
+    }
+
+    var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        return formatter
+    }
 }
 
+
 struct RestaurantCard: View {
-    let restaurant: Restaurant
+    let outing: RecommendedOuting
     @EnvironmentObject var viewModel: ContentViewModel
     @State private var showingInviteSheet = false
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            AsyncImage(url: URL(string: restaurant.imageUrl)) { image in
+            // Restaurant Image
+            AsyncImage(url: URL(string: outing.restaurant.imageUrl)) { image in
                 image.resizable()
                     .aspectRatio(contentMode: .fill)
             } placeholder: {
@@ -442,29 +464,48 @@ struct RestaurantCard: View {
             }
             .frame(height: 200)
             .cornerRadius(10)
-            
-            Text(restaurant.name)
+
+            // Restaurant Name
+            Text(outing.restaurant.name)
                 .font(.headline)
-            
-            Text("Rating: \(restaurant.rating, specifier: "%.1f") (\(restaurant.reviewCount) reviews)")
+
+            // Rating and Reviews
+            HStack {
+                ForEach(0..<Int(outing.restaurant.rating.rounded())) { _ in
+                    Image(systemName: "star.fill")
+                        .foregroundColor(.yellow)
+                }
+                Text("(\(outing.restaurant.reviewCount) reviews)")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+            }
+
+            // Categories
+            Text("Categories: \(outing.restaurant.categories.map { $0.title }.joined(separator: ", "))")
                 .font(.subheadline)
-            
-            Text("Categories: \(restaurant.categories.map { $0.title }.joined(separator: ", "))")
-                .font(.subheadline)
-            
-            if let price = restaurant.price {
+
+            // Price
+            if let price = outing.restaurant.price {
                 Text("Price: \(price)")
                     .font(.subheadline)
             }
-            
-            Text("Address: \(restaurant.location.displayAddress.joined(separator: ", "))")
+
+            // Address
+            Text("Address: \(outing.restaurant.location.displayAddress.joined(separator: ", "))")
                 .font(.subheadline)
-            
-            if let businessHours = restaurant.businessHours?.first {
-                Text("Open: \(businessHours.isOpenNow ? "Yes" : "No")")
+
+            // Open Now
+            if let businessHours = outing.restaurant.businessHours?.first {
+                let isOpenNow = businessHours.isOpenNow ? "Yes" : "No"
+                Text("Open Now: \(isOpenNow)")
                     .font(.subheadline)
             }
-            
+
+            // Outing Date
+            Text("Date: \(outing.date, formatter: dateFormatter)")
+                .font(.subheadline)
+
+            // Action Buttons
             HStack {
                 Button("Invite Group") {
                     showingInviteSheet = true
@@ -473,8 +514,8 @@ struct RestaurantCard: View {
                 .background(Color.blue)
                 .foregroundColor(.white)
                 .cornerRadius(10)
-                
-                Link("View on Yelp", destination: URL(string: restaurant.url)!)
+
+                Link("View on Yelp", destination: URL(string: outing.restaurant.url)!)
                     .padding()
                     .background(Color.green)
                     .foregroundColor(.white)
@@ -482,17 +523,24 @@ struct RestaurantCard: View {
             }
         }
         .padding()
-        .background(Color.white)
+        .background(Color(UIColor.systemBackground))
         .cornerRadius(15)
         .shadow(radius: 5)
         .sheet(isPresented: $showingInviteSheet) {
-            InviteView(restaurant: restaurant)
+            InviteView(outing: outing)
         }
+    }
+
+    var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .short
+        return formatter
     }
 }
 
 struct InviteView: View {
-    let restaurant: Restaurant
+    let outing: RecommendedOuting
     @EnvironmentObject var viewModel: ContentViewModel
     @State private var selectedFriends: Set<UUID> = []
     @State private var invitationDate = Date()
@@ -518,10 +566,10 @@ struct InviteView: View {
                 }
                 
                 Button("Send Invitation") {
-                    let invitedFriends = viewModel.currentUser.friends.filter { selectedFriends.contains($0.id) }
-                    viewModel.sendInvitation(to: invitedFriends, for: restaurant, at: invitationDate)
-                    presentationMode.wrappedValue.dismiss()
-                }
+                           let invitedFriends = viewModel.currentUser.friends.filter { selectedFriends.contains($0.id) }
+                           viewModel.sendInvitation(to: invitedFriends, for: outing.restaurant, at: invitationDate)
+                           presentationMode.wrappedValue.dismiss()
+                       }
             }
             .navigationTitle("Invite Friends")
         }
@@ -600,14 +648,42 @@ struct InvitationRow: View {
 
 struct ProfileView: View {
     @EnvironmentObject var viewModel: ContentViewModel
+        @State private var selectedDays: [Int] = []
+        @State private var preferencesText: String = ""
     
     var body: some View {
         NavigationView {
             Form {
                 Section(header: Text("Personal Info")) {
-                    Text("Name: \(viewModel.currentUser.name)")
-                    Text("Preferences: \(viewModel.currentUser.preferences.joined(separator: ", "))")
-                }
+                                    Text("Name: \(viewModel.currentUser.name)")
+
+                                    TextField("Preferences (comma-separated)", text: $preferencesText)
+                                        .onAppear {
+                                            preferencesText = viewModel.currentUser.preferences.joined(separator: ", ")
+                                        }
+                                        .onChange(of: preferencesText) { newValue in
+                                            viewModel.currentUser.preferences = newValue.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                                            viewModel.updateRecommendedOutings()
+                                        }
+                                }
+                Section(header: Text("Preferred Days")) {
+                                    ForEach(0..<7) { day in
+                                        Toggle(isOn: Binding(
+                                            get: { viewModel.currentUser.preferredDays.contains(day) },
+                                            set: { isSelected in
+                                                if isSelected {
+                                                    viewModel.currentUser.preferredDays.append(day)
+                                                } else {
+                                                    viewModel.currentUser.preferredDays.removeAll { $0 == day }
+                                                }
+                                                // Update available times and recommendations
+                                                viewModel.fetchCalendarEvents()
+                                            }
+                                        )) {
+                                            Text(dayName(for: day))
+                                        }
+                                    }
+                                }
                 
                 Section(header: Text("Available Times")) {
                     ForEach(viewModel.currentUser.availableTimes) { time in
@@ -641,3 +717,4 @@ struct ProfileView: View {
     }
 
 }
+
