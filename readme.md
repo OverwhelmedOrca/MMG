@@ -25,3 +25,7 @@ Also include this feature in recommendation that, the restaurants that your frie
 
 
 make users green, yellow, or red based on their chances of accepting the invite
+
+add calendar events for users
+
+logic for preferences of your friend
