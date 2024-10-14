@@ -3,17 +3,22 @@ import EventKit
 import Foundation
 
 // MARK: - Models
-struct User: Identifiable {
+struct User: Identifiable, Equatable {
     let id = UUID()
     var name: String
     var lovedCuisines: [String]
     var wantToTryCuisines: [String]
-    //var preferences: [String]
-    var preferredDays: [Int] // Days of the week (0 for Sunday, etc.)
+    var preferredDays: [Int]
     var friends: [User]
     var availableTimes: [AvailableTime]
     var availabilityStartTime: Date
     var availabilityEndTime: Date
+    var receivedInvitations: [Invitation] = []
+    var sentInvitations: [Invitation] = []
+    
+    static func == (lhs: User, rhs: User) -> Bool {
+            return lhs.id == rhs.id
+        }
 }
 
 
@@ -102,11 +107,21 @@ struct Category: Decodable {
 struct Invitation: Identifiable {
     let id = UUID()
     let from: User
-    let to: [User]
+    var to: [User]
     let restaurant: Restaurant
     let proposedTime: Date
     var status: InvitationStatus = .pending
+    var enableForwarding: Bool
+    var includeRandos: Bool
+    var participants: [Participant] = []
 }
+
+struct Participant: Identifiable {
+    let id = UUID()
+    let user: User
+    var response: InvitationStatus
+}
+
 struct RecommendedOuting: Identifiable {
     let id = UUID()
     let restaurant: Restaurant
@@ -126,14 +141,18 @@ class ContentViewModel: ObservableObject {
     @Published var sentInvitations: [Invitation] = []
     @Published var receivedInvitations: [Invitation] = []
     @Published var recommendedOutings: [RecommendedOuting] = []
+    @Published var upcomingEvents: [Invitation] = []
 
     
     let eventStore = EKEventStore()
     
     init() {
         let calendar = Calendar.current
-                let defaultStart = calendar.date(from: DateComponents(hour: 17, minute: 0))!
-                let defaultEnd = calendar.date(from: DateComponents(hour: 0, minute: 0))!
+        let now = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM/dd HH:mm"
+        let defaultStart = calendar.date(from: DateComponents(hour: 17, minute: 0))!
+        let defaultEnd = calendar.date(from: DateComponents(hour: 0, minute: 0))!
          
         // Mock user data
         self.currentUser = User(
@@ -149,56 +168,89 @@ class ContentViewModel: ObservableObject {
             availabilityStartTime: defaultStart,
             availabilityEndTime: defaultEnd
         )
-        
-        // Initialize other users
+
+        // Sample dates for testing
+                let date1 = calendar.date(byAdding: .day, value: 1, to: now)!
+                let date2 = calendar.date(byAdding: .day, value: 2, to: now)!
+
+                // Define time slots
+                let timeSlot1Start = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: date1)!
+                let timeSlot1End = calendar.date(bySettingHour: 20, minute: 0, second: 0, of: date1)!
+                let timeSlot2Start = calendar.date(bySettingHour: 19, minute: 0, second: 0, of: date2)!
+                let timeSlot2End = calendar.date(bySettingHour: 21, minute: 0, second: 0, of: date2)!
+
+                // Initialize other users with hardcoded availability
                 let user1 = User(
                     name: "Alice Williams",
                     lovedCuisines: ["French", "Thai"],
                     wantToTryCuisines: ["Korean"],
-                    preferredDays: [5, 6],
+                    preferredDays: [calendar.component(.weekday, from: date1) - 1],
                     friends: [],
-                    availableTimes: [],
-                    availabilityStartTime: defaultStart,
-                    availabilityEndTime: defaultEnd
+                    availableTimes: [
+                        AvailableTime(date: date1, startTime: timeSlot1Start, endTime: timeSlot1End, weekday: calendar.component(.weekday, from: date1) - 1)
+                    ],
+                    availabilityStartTime: timeSlot1Start,
+                    availabilityEndTime: timeSlot1End
                 )
 
                 let user2 = User(
                     name: "David Brown",
                     lovedCuisines: ["Mexican"],
                     wantToTryCuisines: ["Indian"],
-                    preferredDays: [4, 5],
+                    preferredDays: [calendar.component(.weekday, from: date2) - 1],
                     friends: [],
-                    availableTimes: [],
-                    availabilityStartTime: defaultStart,
-                    availabilityEndTime: defaultEnd
+                    availableTimes: [
+                        AvailableTime(date: date2, startTime: timeSlot2Start, endTime: timeSlot2End, weekday: calendar.component(.weekday, from: date2) - 1)
+                    ],
+                    availabilityStartTime: timeSlot2Start,
+                    availabilityEndTime: timeSlot2End
                 )
-
-                // Add users to the users array
+        
+        // Add users to the users array
                 self.users = [currentUser, user1, user2]
 
                 // Set up friendships
-                self.currentUser.friends = [user1] // Bob Johnson is not a friend
-                // Update other users' friends if needed
-
-                // Fetch calendar events for all users
-                fetchCalendarEventsForAllUsers()
-
+                self.currentUser.friends = [user1] // David Brown is not a friend
+        
+        
         
         requestCalendarAccess()
         fetchRestaurants()
     }
     
-    func fetchCalendarEventsForAllUsers() {
-        for index in users.indices {
-            if users[index].id == currentUser.id {
-                // Fetch real calendar events for the current user
-                fetchCalendarEvents(for: &users[index])
-            } else {
-                // Simulate available times for other users
-                users[index].availableTimes = simulateAvailableTimes(for: users[index])
+    func findBestCommonTimeSlot(for users: [User], minimumDuration: TimeInterval = 7200) -> Date? {
+        // Collect current user's available times
+        let creatorTimes = currentUser.availableTimes
+
+        for creatorTime in creatorTimes {
+            var overlappingTime = creatorTime
+            var allAvailable = true
+
+            for user in users where user.id != currentUser.id {
+                if let userTime = user.availableTimes.first(where: { Calendar.current.isDate($0.date, inSameDayAs: overlappingTime.date) }) {
+                    let latestStart = max(overlappingTime.startTime, userTime.startTime)
+                    let earliestEnd = min(overlappingTime.endTime, userTime.endTime)
+                    if earliestEnd.timeIntervalSince(latestStart) >= minimumDuration {
+                        overlappingTime.startTime = latestStart
+                        overlappingTime.endTime = earliestEnd
+                    } else {
+                        allAvailable = false
+                        break
+                    }
+                } else {
+                    allAvailable = false
+                    break
+                }
+            }
+
+            if allAvailable {
+                // Return the earliest overlapping time found
+                return overlappingTime.startTime
             }
         }
-        updateRecommendedOutings()
+
+        // No common time found
+        return nil
     }
 
     
@@ -435,21 +487,100 @@ class ContentViewModel: ObservableObject {
 
 
     
-    func sendInvitation(to friends: [User], for restaurant: Restaurant, at time: Date) {
-        let invitation = Invitation(from: currentUser, to: friends, restaurant: restaurant, proposedTime: time)
+    func sendInvitation(to friends: [User], for restaurant: Restaurant, at time: Date, enableForwarding: Bool, includeRandos: Bool) {
+        var finalRecipients = friends
+        
+        if includeRandos {
+            // Select a random user who is not already a friend and not the current user
+            let potentialRandos = users.filter { user in
+                !user.friends.contains(where: { $0.id == currentUser.id }) &&
+                user.id != currentUser.id &&
+                !currentUser.friends.contains(where: { $0.id == user.id })
+            }
+            if let randomUser = potentialRandos.randomElement() {
+                finalRecipients.append(randomUser)
+            }
+        }
+        
+        // Initialize participants with pending status
+        let participants = finalRecipients.map { Participant(user: $0, response: .pending) }
+        
+        let invitation = Invitation(
+            from: currentUser,
+            to: finalRecipients,
+            restaurant: restaurant,
+            proposedTime: time,
+            enableForwarding: enableForwarding,
+            includeRandos: includeRandos,
+            participants: participants
+        )
+        
         sentInvitations.append(invitation)
-        // In a real app, you would send this invitation to a server or directly to friends
-    }
-    
-    func respondToInvitation(_ invitation: Invitation, accept: Bool) {
-        if let index = receivedInvitations.firstIndex(where: { $0.id == invitation.id }) {
-            receivedInvitations[index].status = accept ? .accepted : .declined
-            if accept {
-                // Add to calendar
-                addEventToCalendar(invitation: invitation)
+        
+        // Add to each recipient's receivedInvitations
+        for recipient in finalRecipients {
+            if let index = users.firstIndex(where: { $0.id == recipient.id }) {
+                users[index].receivedInvitations.append(invitation)
             }
         }
     }
+
+
+    
+    func respondToInvitation(_ invitation: Invitation, user: User, accept: Bool) {
+        // Update the invitation in receivedInvitations
+        if let userIndex = users.firstIndex(where: { $0.id == user.id }) {
+            if let invitationIndex = users[userIndex].receivedInvitations.firstIndex(where: { $0.id == invitation.id }) {
+                if let participantIndex = users[userIndex].receivedInvitations[invitationIndex].participants.firstIndex(where: { $0.user.id == user.id }) {
+                    users[userIndex].receivedInvitations[invitationIndex].participants[participantIndex].response = accept ? .accepted : .declined
+                    
+                    if accept {
+                        // Add to upcoming events
+                        upcomingEvents.append(users[userIndex].receivedInvitations[invitationIndex])
+                        // Add event to calendar
+                        addEventToCalendar(invitation: users[userIndex].receivedInvitations[invitationIndex])
+                    }
+                    
+                    // Optionally, remove the invitation if all participants have responded
+                    let allResponded = users[userIndex].receivedInvitations[invitationIndex].participants.allSatisfy { $0.response != .pending }
+                    if allResponded {
+                        users[userIndex].receivedInvitations.remove(at: invitationIndex)
+                    }
+                }
+            }
+        }
+        
+        // Update the invitation in sentInvitations
+        if let senderIndex = users.firstIndex(where: { $0.id == invitation.from.id }) {
+            if let sentInvitationIndex = users[senderIndex].sentInvitations.firstIndex(where: { $0.id == invitation.id }) {
+                if let participantIndex = users[senderIndex].sentInvitations[sentInvitationIndex].participants.firstIndex(where: { $0.user.id == user.id }) {
+                    users[senderIndex].sentInvitations[sentInvitationIndex].participants[participantIndex].response = accept ? .accepted : .declined
+                }
+            }
+        }
+    }
+    
+    
+    func forwardInvitation(_ invitation: Invitation, to newFriends: [User]) {
+        var updatedInvitation = invitation
+        updatedInvitation.to.append(contentsOf: newFriends)
+        updatedInvitation.participants.append(contentsOf: newFriends.map { Participant(user: $0, response: .pending) })
+        
+        // Update sentInvitations
+        if let senderIndex = users.firstIndex(where: { $0.id == invitation.from.id }) {
+            if let sentInvitationIndex = users[senderIndex].sentInvitations.firstIndex(where: { $0.id == invitation.id }) {
+                users[senderIndex].sentInvitations[sentInvitationIndex] = updatedInvitation
+            }
+        }
+        
+        // Add the forwarded invitation to new friends' receivedInvitations
+        for friend in newFriends {
+            if let index = users.firstIndex(where: { $0.id == friend.id }) {
+                users[index].receivedInvitations.append(updatedInvitation)
+            }
+        }
+    }
+    
     
     func addEventToCalendar(invitation: Invitation) {
         let event = EKEvent(eventStore: eventStore)
@@ -466,22 +597,29 @@ class ContentViewModel: ObservableObject {
         }
     }
 }
+
+
 // MARK: - Views
 struct ContentView: View {
     @StateObject private var viewModel = ContentViewModel()
-    
+
     var body: some View {
         TabView {
             HomeView()
                 .tabItem {
                     Label("Home", systemImage: "house")
                 }
-            
+
             InvitationsView()
                 .tabItem {
                     Label("Invitations", systemImage: "envelope")
                 }
-            
+
+            UpcomingEventsView()
+                .tabItem {
+                    Label("Events", systemImage: "calendar")
+                }
+
             ProfileView()
                 .tabItem {
                     Label("Profile", systemImage: "person")
@@ -496,14 +634,18 @@ struct HomeView: View {
 
     var body: some View {
         NavigationView {
-            TabView {
-                ForEach(viewModel.recommendedOutings) { outing in
-                    RestaurantCard(outing: outing)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            GeometryReader { geometry in
+                TabView {
+                    ForEach(viewModel.recommendedOutings) { outing in
+                        RestaurantCard(outing: outing)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
                 }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
-            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
             .navigationBarHidden(true)
+            .edgesIgnoringSafeArea(.all)
         }
     }
 }
@@ -515,93 +657,83 @@ struct RestaurantCard: View {
     @State private var showingInviteSheet = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                // Restaurant Image
-                AsyncImage(url: URL(string: outing.restaurant.imageUrl)) { image in
-                    image.resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Color.gray
+        VStack(alignment: .leading, spacing: 12) {
+            // Restaurant Image
+            AsyncImage(url: URL(string: outing.restaurant.imageUrl)) { image in
+                image.resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Color.gray
+            }
+            .frame(height: 200)
+            .clipped()
+            .cornerRadius(10)
+
+            // Restaurant Name
+            Text(outing.restaurant.name)
+                .font(.title2)
+                .fontWeight(.bold)
+
+            // Rating and Reviews
+            HStack {
+                ForEach(0..<Int(outing.restaurant.rating.rounded()), id: \.self) { _ in
+                    Image(systemName: "star.fill")
+                        .foregroundColor(.yellow)
                 }
-                .frame(height: 400) // Adjust height as needed
-                .clipped()
-                .cornerRadius(10)
-                
-                // Restaurant Name
-                Text(outing.restaurant.name)
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
-                // Rating and Reviews
-                HStack {
-                    ForEach(0..<Int(outing.restaurant.rating.rounded()), id: \.self) { _ in
-                        Image(systemName: "star.fill")
-                            .foregroundColor(.yellow)
-                    }
-                    Text("(\(outing.restaurant.reviewCount) reviews)")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                }
-                
-                // Categories and Price
-                HStack {
-                    Text(outing.restaurant.categories.map { $0.title }.joined(separator: ", "))
+                Text("(\(outing.restaurant.reviewCount) reviews)")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+            }
+
+            // Categories and Price
+            HStack {
+                Text(outing.restaurant.categories.map { $0.title }.joined(separator: ", "))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Spacer()
+                if let price = outing.restaurant.price {
+                    Text(price)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    Spacer()
-                    if let price = outing.restaurant.price {
-                        Text(price)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
                 }
-                
-                // Address
-                Text(outing.restaurant.location.displayAddress.joined(separator: ", "))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                // Open Now
-                if let businessHours = outing.restaurant.businessHours?.first {
-                    Text("Open Now: \(businessHours.isOpenNow ? "Yes" : "No")")
-                        .font(.subheadline)
-                        .foregroundColor(businessHours.isOpenNow ? .green : .red)
-                }
-                
-                // Outing Date
-                Text("Date: \(outing.date, formatter: dateFormatter)")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                // Action Buttons
-                HStack {
-                    Button("Invite Group") {
-                        showingInviteSheet = true
-                    }
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-                    
-                    Button(action: {
-                        if let url = URL(string: outing.restaurant.url) {
-                            UIApplication.shared.open(url)
-                        }
-                    }) {
-                        Text("View on Yelp")
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.green)
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
-                    }
+            }
 
-                    .padding()
-                    .background(Color.green)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
+            // Address
+            Text(outing.restaurant.location.displayAddress.joined(separator: ", "))
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            // Open Now
+            if let businessHours = outing.restaurant.businessHours?.first {
+                Text("Open Now: \(businessHours.isOpenNow ? "Yes" : "No")")
+                    .font(.subheadline)
+                    .foregroundColor(businessHours.isOpenNow ? .green : .red)
+            }
+
+            // Outing Date
+            Text("Date: \(outing.date, formatter: dateFormatter)")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            // Action Buttons
+            HStack {
+                Button("Invite Group") {
+                    showingInviteSheet = true
                 }
+                .padding()
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(10)
+
+                Button("View on Yelp") {
+                    if let url = URL(string: outing.restaurant.url) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .padding()
+                .background(Color.green)
+                .foregroundColor(.white)
+                .cornerRadius(10)
             }
         }
         .padding()
@@ -624,9 +756,11 @@ struct InviteView: View {
     let outing: RecommendedOuting
     @EnvironmentObject var viewModel: ContentViewModel
     @State private var selectedFriends: Set<UUID> = []
-    @State private var invitationDate = Date()
+    @State private var proposedTime: Date?
+    @State private var enableForwarding = false
+    @State private var includeRandos = false
     @Environment(\.presentationMode) var presentationMode
-    
+
     var body: some View {
         NavigationView {
             Form {
@@ -641,21 +775,58 @@ struct InviteView: View {
                         }
                     }
                 }
-                
-                Section(header: Text("Select Date and Time")) {
-                    DatePicker("Date and Time", selection: $invitationDate, in: Date()...)
+
+                Section {
+                    Toggle("Enable Forwarding", isOn: $enableForwarding)
+                    Toggle("Okay with Randos", isOn: $includeRandos)
                 }
-                
+
+                if let time = proposedTime {
+                    Section(header: Text("Suggested Time")) {
+                        Text("\(time, formatter: dateFormatter)")
+                    }
+                } else {
+                    Section {
+                        Text("No common time found.")
+                            .foregroundColor(.red)
+                    }
+                }
+
                 Button("Send Invitation") {
-                           let invitedFriends = viewModel.currentUser.friends.filter { selectedFriends.contains($0.id) }
-                           viewModel.sendInvitation(to: invitedFriends, for: outing.restaurant, at: invitationDate)
-                           presentationMode.wrappedValue.dismiss()
-                       }
+                    let invitedFriends = viewModel.users.filter { selectedFriends.contains($0.id) }
+                    if let time = proposedTime {
+                        viewModel.sendInvitation(to: invitedFriends, for: outing.restaurant, at: time, enableForwarding: enableForwarding, includeRandos: includeRandos)
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+                .disabled(proposedTime == nil)
             }
             .navigationTitle("Invite Friends")
+            .onChange(of: selectedFriends) { _ in
+                updateProposedTime()
+            }
+            .onAppear {
+                selectedFriends = Set(viewModel.currentUser.friends.map { $0.id })
+                updateProposedTime()
+            }
         }
     }
+
+    func updateProposedTime() {
+        let selectedUsers = viewModel.users.filter { selectedFriends.contains($0.id) }
+        proposedTime = viewModel.findBestCommonTimeSlot(for: [viewModel.currentUser] + selectedUsers)
+    }
+
+    var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .short
+        return formatter
+    }
 }
+
+
+
 
 struct MultipleSelectionRow: View {
     let title: String
@@ -705,29 +876,84 @@ struct InvitationsView: View {
 struct InvitationRow: View {
     let invitation: Invitation
     @EnvironmentObject var viewModel: ContentViewModel
+    @State private var showingForwardSheet = false
     
+    var isAvailable: Bool {
+        // Check if current user is available at the proposed time
+        let userTimes = viewModel.currentUser.availableTimes
+        return userTimes.contains { $0.startTime <= invitation.proposedTime && $0.endTime >= invitation.proposedTime.addingTimeInterval(7200) }
+    }
+
     var body: some View {
-        VStack(alignment: .leading) {
-            Text("\(invitation.from.name) invited you to \(invitation.restaurant.name)")
-            Text("Date: \(invitation.proposedTime, style: .date)")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("\(invitation.from.name) invited you to \(invitation.restaurant.name)")
+                    .font(.headline)
+                Spacer()
+                Circle()
+                    .fill(isAvailable ? Color.green : Color.red)
+                    .frame(width: 10, height: 10)
+            }
+            
+            Text("Date: \(invitation.proposedTime, formatter: dateFormatter)")
+                .font(.subheadline)
+            
+            Text("Participants: \(invitation.to.count)")
+                .font(.subheadline)
+            
+            DisclosureGroup("See Responses") {
+                ForEach(invitation.participants) { participant in
+                    HStack {
+                        Text(participant.user.name)
+                        Spacer()
+                        Text(participant.response == .accepted ? "Accepted" : participant.response == .declined ? "Declined" : "Pending")
+                            .foregroundColor(participant.response == .accepted ? .green : participant.response == .declined ? .red : .orange)
+                    }
+                }
+            }
+            
             HStack {
                 Button("Accept") {
-                    viewModel.respondToInvitation(invitation, accept: true)
+                    viewModel.respondToInvitation(invitation, user: viewModel.currentUser, accept: true)
                 }
-                .padding()
-                .background(Color.green)
+                .padding(8)
+                .background(isAvailable ? Color.green : Color.gray)
                 .foregroundColor(.white)
-                .cornerRadius(10)
+                .cornerRadius(8)
+                .disabled(!isAvailable)
                 
                 Button("Decline") {
-                    viewModel.respondToInvitation(invitation, accept: false)
+                    viewModel.respondToInvitation(invitation, user: viewModel.currentUser, accept: false)
                 }
-                .padding()
+                .padding(8)
                 .background(Color.red)
                 .foregroundColor(.white)
-                .cornerRadius(10)
+                .cornerRadius(8)
+                
+                if invitation.enableForwarding {
+                    Button("Forward") {
+                        showingForwardSheet = true
+                    }
+                    .padding(8)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                }
             }
         }
+        .padding()
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(10)
+        .sheet(isPresented: $showingForwardSheet) {
+            ForwardInvitationView(invitation: invitation)
+        }
+    }
+    
+    var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .short
+        return formatter
     }
 }
 
@@ -897,4 +1123,70 @@ struct PreferencesView: View {
         }
     }
 }
+struct UpcomingEventsView: View {
+    @EnvironmentObject var viewModel: ContentViewModel
 
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(viewModel.upcomingEvents) { event in
+                    VStack(alignment: .leading) {
+                        Text(event.restaurant.name)
+                            .font(.headline)
+                        Text("Date: \(event.proposedTime, formatter: dateFormatter)")
+                        DisclosureGroup("Participants") {
+                            ForEach(event.to) { user in
+                                Text(user.name)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Upcoming Events")
+        }
+    }
+
+    var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .short
+        return formatter
+    }
+}
+struct ForwardInvitationView: View {
+    let invitation: Invitation
+    @EnvironmentObject var viewModel: ContentViewModel
+    @Environment(\.presentationMode) var presentationMode
+    @State private var selectedFriends: Set<UUID> = []
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Select Friends to Forward To")) {
+                    ForEach(viewModel.currentUser.friends.filter { friend in
+                        !invitation.to.contains(where: { $0.id == friend.id })
+                    }) { friend in
+                        MultipleSelectionRow(title: friend.name, isSelected: selectedFriends.contains(friend.id)) {
+                            if selectedFriends.contains(friend.id) {
+                                selectedFriends.remove(friend.id)
+                            } else {
+                                selectedFriends.insert(friend.id)
+                            }
+                        }
+                    }
+                }
+                
+                Button("Forward Invitation") {
+                    let friendsToForward = viewModel.currentUser.friends.filter { selectedFriends.contains($0.id) }
+                    viewModel.forwardInvitation(invitation, to: friendsToForward)
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .disabled(selectedFriends.isEmpty)
+            }
+            .navigationTitle("Forward Invitation")
+            .navigationBarItems(trailing: Button("Cancel") {
+                presentationMode.wrappedValue.dismiss()
+            })
+        }
+    }
+}
