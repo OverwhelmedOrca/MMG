@@ -29,3 +29,5 @@ make users green, yellow, or red based on their chances of accepting the invite
 add calendar events for users
 
 logic for preferences of your friend
+
+influencer's data through instagram
