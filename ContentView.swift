@@ -151,7 +151,13 @@ class ContentViewModel: ObservableObject {
     @Published var receivedInvitations: [Invitation] = []
     @Published var recommendedOutings: [RecommendedOuting] = []
     @Published var upcomingEvents: [Invitation] = []
-
+    @Published var selectedLocation: String = "New York" {
+            didSet {
+                fetchRestaurants()
+            }
+        }
+        
+        let locations = ["New York", "Boston", "Chicago"]
     
     let eventStore = EKEventStore()
     
@@ -442,9 +448,9 @@ class ContentViewModel: ObservableObject {
     
     func fetchRestaurants() {
         let apiKey = "tuhu5KX82xiVBfNPwQeC0n-vesx7mDDo1OJul7PPmqsrDMrigjc2eDMp0CSamwUkUricjlrRooufMt8UpBMjGHiEN1d22708MvVnFCd99ClkkRCkl185umQwX28LZ3Yx"
-        let location = "New+York" // Replace this with dynamic location
-        let url = URL(string: "https://api.yelp.com/v3/businesses/search?location=\(location)&term=restaurants")!
-        
+        let encodedLocation = selectedLocation.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? ""
+                let url = URL(string: "https://api.yelp.com/v3/businesses/search?location=\(encodedLocation)&term=restaurants")!
+                
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         
@@ -762,39 +768,44 @@ struct HomeView: View {
 
     var body: some View {
         NavigationView {
-            ZStack {
-                Color(.systemBackground).edgesIgnoringSafeArea(.all)
-                
-                VStack(spacing: 0) {
-                    // Top Picks Header
-                    Text("Our Top Picks")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                        .padding(.top, 20)
-                        .background(
-                            LinearGradient(gradient: Gradient(colors: [Color.blue.opacity(0.3), Color.clear]), startPoint: .top, endPoint: .bottom)
-                        )
-                    
-                    // Restaurant Cards
-                    GeometryReader { geometry in
-                        TabView {
-                            ForEach(viewModel.recommendedOutings) { outing in
-                                RestaurantCard(outing: outing)
-                                    .frame(width: geometry.size.width - 40, height: geometry.size.height - 100)
-                                    .padding(.bottom, 20)
-                            }
-                        }
-                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
+            VStack(spacing: 0) {
+                // Location Dropdown
+                Picker("Location", selection: $viewModel.selectedLocation) {
+                    ForEach(viewModel.locations, id: \.self) {
+                        Text($0)
                     }
+                }
+                .pickerStyle(MenuPickerStyle())
+                .padding()
+                .background(Color.blue.opacity(0.1))
+                
+                // Top Picks Header
+                Text("Our Top Picks")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.top, 20)
+                    .background(
+                        LinearGradient(gradient: Gradient(colors: [Color.blue.opacity(0.3), Color.clear]), startPoint: .top, endPoint: .bottom)
+                    )
+                
+                // Restaurant Cards
+                GeometryReader { geometry in
+                    TabView {
+                        ForEach(viewModel.recommendedOutings) { outing in
+                            RestaurantCard(outing: outing)
+                                .frame(width: geometry.size.width - 40, height: geometry.size.height - 100)
+                                .padding(.bottom, 20)
+                        }
+                    }
+                    .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
                 }
             }
             .navigationBarHidden(true)
         }
     }
 }
-
 
 struct RestaurantCard: View {
     let outing: RecommendedOuting
