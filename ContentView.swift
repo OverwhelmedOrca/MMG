@@ -134,6 +134,13 @@ enum InvitationStatus: String {
     case declined = "Declined"
 }
 
+enum OverlapStatus {
+    case full
+    case partial
+    case none
+}
+
+
 // MARK: - ViewModel
 class ContentViewModel: ObservableObject {
     @Published var currentUser: User
@@ -334,7 +341,14 @@ class ContentViewModel: ObservableObject {
         var roundedComponents = components
 
         if let minute = components.minute {
-            roundedComponents.minute = minute - (minute % 5)
+            if minute < 15 {
+                roundedComponents.minute = 0
+            } else if minute < 45 {
+                roundedComponents.minute = 30
+            } else {
+                roundedComponents.hour = (components.hour ?? 0) + 1
+                roundedComponents.minute = 0
+            }
         }
 
         return calendar.date(from: roundedComponents) ?? date
@@ -866,8 +880,7 @@ struct RestaurantCard: View {
         return formatter
     }
 }
-     
-
+   
 
 struct InviteView: View {
     let outing: RecommendedOuting
@@ -878,6 +891,8 @@ struct InviteView: View {
     @State private var enableForwarding = false
     @State private var includeRandos = false
     @Environment(\.presentationMode) var presentationMode
+    @State private var showNoOverlapAlert = false
+    @State private var overlapStatuses: [UUID: OverlapStatus] = [:]
 
     init(outing: RecommendedOuting) {
         self.outing = outing
@@ -902,38 +917,39 @@ struct InviteView: View {
                 }
 
                 Section(header: Text("Proposed Time")) {
-                    DatePicker("Start Time", selection: $proposedStartTime, displayedComponents: [.date, .hourAndMinute])
-                        .onChange(of: proposedStartTime) { _ in
-                            // Optionally, you can validate or adjust end time here
-                        }
-                    DatePicker("End Time", selection: $proposedEndTime, displayedComponents: [.hourAndMinute])
-                        .onChange(of: proposedEndTime) { _ in
-                            // Optionally, you can validate or adjust start time here
-                        }
-                }
+                                    DatePicker("Start Time", selection: $proposedStartTime, displayedComponents: [.date, .hourAndMinute])
+                                        .onChange(of: proposedStartTime) { _ in
+                                            updateOverlapStatuses()
+                                        }
+                                    DatePicker("End Time", selection: $proposedEndTime, displayedComponents: [.hourAndMinute])
+                                        .onChange(of: proposedEndTime) { _ in
+                                            updateOverlapStatuses()
+                                        }
+                                }
 
                 Section(header: Text("Friends' Availability")) {
-                    ForEach(viewModel.currentUser.friends.filter { selectedFriends.contains($0.id) }) { friend in
-                        if let availability = friend.availableTimes.first(where: { Calendar.current.isDate($0.date, inSameDayAs: proposedStartTime) }) {
-                            Text("\(friend.name): \(formatTime(availability.startTime)) - \(formatTime(availability.endTime))")
-                        } else {
-                            Text("\(friend.name): No availability")
-                                .foregroundColor(.gray)
-                        }
-                    }
-                }
-                
-                Section(header: Text("Friends' Availability")) {
-                    ForEach(viewModel.currentUser.friends.filter { selectedFriends.contains($0.id) }) { friend in
-                        if let availability = friend.availableTimes.first(where: { Calendar.current.isDate($0.date, inSameDayAs: proposedStartTime) }) {
-                            Text("\(friend.name): \(formatTime(availability.startTime)) - \(formatTime(availability.endTime))")
-                        } else {
-                            Text("\(friend.name): No availability")
-                                .foregroundColor(.gray)
-                        }
-                    }
-                }
+                                    ForEach(viewModel.currentUser.friends.filter { selectedFriends.contains($0.id) }) { friend in
+                                        if let availability = friend.availableTimes.first(where: { Calendar.current.isDate($0.date, inSameDayAs: proposedStartTime) }) {
+                                            let status = overlapStatuses[friend.id] ?? .none
 
+                                            HStack {
+                                                Text("\(friend.name): \(formatTime(availability.startTime)) - \(formatTime(availability.endTime))")
+                                                    .foregroundColor(colorForStatus(status))
+                                                Spacer()
+                                                Image(systemName: iconForStatus(status))
+                                                    .foregroundColor(colorForStatus(status))
+                                            }
+                                        } else {
+                                            HStack {
+                                                Text("\(friend.name): No availability")
+                                                    .foregroundColor(.red)
+                                                Spacer()
+                                                Image(systemName: "xmark.octagon")
+                                                    .foregroundColor(.red)
+                                            }
+                                        }
+                                    }
+                                }
 
                 Section {
                     Toggle("Enable Forwarding", isOn: $enableForwarding)
@@ -951,20 +967,84 @@ struct InviteView: View {
             .onAppear {
                 updateProposedTime()
             }
+            .onChange(of: selectedFriends) { _ in
+                            updateProposedTime()
+                        }
+            .alert(isPresented: $showNoOverlapAlert) {
+                Alert(
+                    title: Text("No Overlapping Time"),
+                    message: Text("Selected friends do not have overlapping availability for the proposed time."),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+        }
+    }
+
+    // Helper function to determine the color based on overlap status
+    func colorForStatus(_ status: OverlapStatus) -> Color {
+        switch status {
+        case .full:
+            return .green
+        case .partial:
+            return .yellow
+        case .none:
+            return .red
+        }
+    }
+
+    // Helper function to determine the icon based on overlap status
+    func iconForStatus(_ status: OverlapStatus) -> String {
+        switch status {
+        case .full:
+            return "checkmark.circle"
+        case .partial:
+            return "exclamationmark.triangle"
+        case .none:
+            return "xmark.octagon"
+        }
+    }
+
+    // Helper function to determine overlap status
+    func getOverlapStatus(friendStart: Date, friendEnd: Date, inviteStart: Date, inviteEnd: Date) -> OverlapStatus {
+        if friendStart <= inviteStart && friendEnd >= inviteEnd {
+            return .full
+        } else if friendEnd <= inviteStart || friendStart >= inviteEnd {
+            return .none
+        } else {
+            return .partial
         }
     }
 
     func updateProposedTime() {
-        let selectedUsers = [viewModel.currentUser] + viewModel.users.filter { selectedFriends.contains($0.id) }
-        if let bestSlot = viewModel.findBestTimeSlot(for: selectedUsers, on: outing.date) {
-            proposedStartTime = bestSlot.startTime
-            proposedEndTime = bestSlot.endTime
-        } else {
-            // Fallback to default or notify user
-            proposedStartTime = outing.date
-            proposedEndTime = outing.date.addingTimeInterval(7200)
+            let selectedUsers = [viewModel.currentUser] + viewModel.users.filter { selectedFriends.contains($0.id) }
+            if let bestSlot = viewModel.findBestTimeSlot(for: selectedUsers, on: outing.date) {
+                proposedStartTime = bestSlot.startTime
+                proposedEndTime = bestSlot.endTime
+                updateOverlapStatuses()
+            } else {
+                // Fallback to default or notify user
+                proposedStartTime = outing.date
+                proposedEndTime = outing.date.addingTimeInterval(7200)
+                showNoOverlapAlert = true
+                updateOverlapStatuses()
+            }
         }
-    }
+    func updateOverlapStatuses() {
+            for friendId in selectedFriends {
+                if let friend = viewModel.currentUser.friends.first(where: { $0.id == friendId }),
+                   let availability = friend.availableTimes.first(where: { Calendar.current.isDate($0.date, inSameDayAs: proposedStartTime) }) {
+                    let status = getOverlapStatus(
+                        friendStart: availability.startTime,
+                        friendEnd: availability.endTime,
+                        inviteStart: proposedStartTime,
+                        inviteEnd: proposedEndTime
+                    )
+                    overlapStatuses[friendId] = status
+                } else {
+                    overlapStatuses[friendId] = .none
+                }
+            }
+        }
 
     func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
@@ -972,6 +1052,9 @@ struct InviteView: View {
         return formatter.string(from: date)
     }
 }
+
+
+
 
 
 
