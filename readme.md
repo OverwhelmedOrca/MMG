@@ -31,3 +31,19 @@ add calendar events for users
 logic for preferences of your friend
 
 influencer's data through instagram
+feature where you can follow influencers and that will help you create new plans based on where they were, similar on insta
+
+question arises what do we prioritize: each user's preference or good place and then preference and availabilities
+
+i could've just sent request which would have directly fetched me restoraunts of certain categories, but neither did i have the rate limit nor did it make sense
+
+so many other factors that could be taken into account: Dietary restrictions: Some group members may have allergies, be vegetarian/vegan, or have other dietary needs.
+Price range,
+Atmosphere,
+Group size,
+Accessibility,
+Special occasions,
+Noise level,
+Wait times,
+Unique experiences,
+Distance,
