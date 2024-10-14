@@ -23,3 +23,5 @@ if the invite is red, which means you are not available at that time, remember t
 
 Also include this feature in recommendation that, the restaurants that your friends prefer show up first. basically implement a shorting function.
 
+
+make users green, yellow, or red based on their chances of accepting the invite
