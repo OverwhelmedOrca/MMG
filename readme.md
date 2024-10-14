@@ -18,3 +18,8 @@ if the invite is red, which means you are not available at that time, remember t
    b. you can reject it which will do the above discussed
    c. you can forward it.
 
+
+
+
+Also include this feature in recommendation that, the restaurants that your friends prefer show up first. basically implement a shorting function.
+
